@@ -416,6 +416,7 @@ void Settings::Load(const SettingsInterface& si, const SettingsInterface& contro
   display_pre_frame_sleep_buffer =
     si.GetFloatValue("Display", "PreFrameSleepBuffer", DEFAULT_DISPLAY_PRE_FRAME_SLEEP_BUFFER);
   display_skip_presenting_duplicate_frames = si.GetBoolValue("Display", "SkipPresentingDuplicateFrames", false);
+  display_fast_forward_frame_skip = std::min<u32>(si.GetUIntValue("Display", "FastForwardFrameSkip", 0), 3);
   display_vsync = si.GetBoolValue("Display", "VSync", false);
   display_disable_mailbox_presentation = si.GetBoolValue("Display", "DisableMailboxPresentation", false);
   display_force_4_3_for_24bit = si.GetBoolValue("Display", "Force4_3For24Bit", false);
@@ -778,6 +779,7 @@ void Settings::Save(SettingsInterface& si, bool for_copy) const
   si.SetBoolValue("Display", "OptimalFramePacing", display_optimal_frame_pacing);
   si.SetBoolValue("Display", "PreFrameSleep", display_pre_frame_sleep);
   si.SetBoolValue("Display", "SkipPresentingDuplicateFrames", display_skip_presenting_duplicate_frames);
+  si.SetUIntValue("Display", "FastForwardFrameSkip", display_fast_forward_frame_skip);
   si.SetFloatValue("Display", "PreFrameSleepBuffer", display_pre_frame_sleep_buffer);
   si.SetBoolValue("Display", "VSync", display_vsync);
   si.SetBoolValue("Display", "DisableMailboxPresentation", display_disable_mailbox_presentation);

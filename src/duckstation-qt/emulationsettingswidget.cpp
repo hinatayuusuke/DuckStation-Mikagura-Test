@@ -131,6 +131,7 @@ EmulationSettingsWidget::EmulationSettingsWidget(SettingsWindow* dialog, QWidget
   SettingWidgetBinder::BindWidgetToBoolSetting(sif, m_ui.preFrameSleep, "Display", "PreFrameSleep", false);
   SettingWidgetBinder::BindWidgetToBoolSetting(sif, m_ui.skipPresentingDuplicateFrames, "Display",
                                                "SkipPresentingDuplicateFrames", false);
+  SettingWidgetBinder::BindWidgetToIntSetting(sif, m_ui.fastForwardFrameSkip, "Display", "FastForwardFrameSkip", 0);
   SettingWidgetBinder::BindWidgetToFloatSetting(sif, m_ui.preFrameSleepBuffer, "Display", "PreFrameSleepBuffer",
                                                 Settings::DEFAULT_DISPLAY_PRE_FRAME_SLEEP_BUFFER);
   SettingWidgetBinder::BindWidgetToBoolSetting(sif, m_ui.rewindEnable, "Main", "RewindEnable", false);
@@ -171,6 +172,10 @@ EmulationSettingsWidget::EmulationSettingsWidget(SettingsWindow* dialog, QWidget
   dialog->registerWidgetHelp(
     m_ui.fastForwardSpeed, tr("Fast Forward Speed"), tr("User Preference"),
     tr("Sets the fast forward speed. This speed will be used when the fast forward hotkey is pressed/toggled."));
+  dialog->registerWidgetHelp(
+    m_ui.fastForwardFrameSkip, tr("Fast Forward Frame Skip"), tr("Disabled"),
+    tr("Skips display presentation candidates while fast forwarding. Does not reduce emulation workload. Actual "
+       "display FPS depends on the host display and other presentation settings."));
   dialog->registerWidgetHelp(
     m_ui.turboSpeed, tr("Turbo Speed"), tr("User Preference"),
     tr("Sets the turbo speed. This speed will be used when the turbo hotkey is pressed/toggled. Turboing will take "

@@ -50,6 +50,13 @@
         </property>
        </widget>
       </item>
+      <item row="3" column="0">
+       <widget class="QLabel" name="fastForwardFrameSkipLabel">
+        <property name="text">
+         <string>Fast Forward Frame Skip:</string>
+        </property>
+       </widget>
+      </item>
       <item row="0" column="1">
        <layout class="QHBoxLayout" name="normalSpeedLayout" stretch="1,0,0">
         <item>
@@ -154,6 +161,30 @@
          </widget>
         </item>
        </layout>
+      </item>
+      <item row="3" column="1">
+       <widget class="QComboBox" name="fastForwardFrameSkip">
+        <item>
+         <property name="text">
+          <string>Disabled</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>1 Frame</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>2 Frames</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>3 Frames</string>
+         </property>
+        </item>
+       </widget>
       </item>
      </layout>
     </widget>

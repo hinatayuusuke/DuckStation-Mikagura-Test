@@ -375,6 +375,7 @@ TRANSLATE_NOOP("FullscreenUI", "Failed to save custom serial.");
 TRANSLATE_NOOP("FullscreenUI", "Failed to save custom title.");
 TRANSLATE_NOOP("FullscreenUI", "Fast Boot");
 TRANSLATE_NOOP("FullscreenUI", "Fast Forward Boot");
+TRANSLATE_NOOP("FullscreenUI", "Fast Forward Frame Skip");
 TRANSLATE_NOOP("FullscreenUI", "Fast Forward Memory Card Access");
 TRANSLATE_NOOP("FullscreenUI", "Fast Forward Speed");
 TRANSLATE_NOOP("FullscreenUI", "Fast Forward Volume");
@@ -796,6 +797,7 @@ TRANSLATE_NOOP("FullscreenUI", "Simulates the system ahead of time and rolls bac
 TRANSLATE_NOOP("FullscreenUI", "Size: ");
 TRANSLATE_NOOP("FullscreenUI", "Skip Duplicate Frame Display");
 TRANSLATE_NOOP("FullscreenUI", "Skips the presentation/display of frames that are not unique. Can result in worse frame pacing.");
+TRANSLATE_NOOP("FullscreenUI", "Skips display presentation candidates while fast forwarding. Does not reduce emulation workload. Actual display FPS depends on the host display and other presentation settings.");
 TRANSLATE_NOOP("FullscreenUI", "Slow Boot");
 TRANSLATE_NOOP("FullscreenUI", "Smooth Scrolling");
 TRANSLATE_NOOP("FullscreenUI", "Smooths out blockyness between colour transitions in 24-bit content, usually FMVs.");

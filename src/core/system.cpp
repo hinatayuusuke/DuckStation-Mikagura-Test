@@ -249,6 +249,7 @@ struct StateVars
 
   bool fast_forward_enabled = false;
   bool turbo_enabled = false;
+  u32 fast_forward_display_skip_counter = 0;
 
   bool runahead_replay_pending = false;
   u8 memory_card_fast_forward_frames = 0;
@@ -1246,6 +1247,9 @@ void System::ApplySettings(bool display_osd_messages)
     }
   }
 
+  if (g_settings.display_fast_forward_frame_skip != old_settings.display_fast_forward_frame_skip)
+    s_state.fast_forward_display_skip_counter = 0;
+
   CheckForSettingsChanges(old_settings);
   Host::OnSettingsReloaded();
 }
@@ -1945,6 +1949,7 @@ bool System::Initialize(std::unique_ptr<CDImage> disc, DiscRegion disc_region, b
   s_state.next_frame_time = 0;
   s_state.turbo_enabled = false;
   s_state.fast_forward_enabled = false;
+  s_state.fast_forward_display_skip_counter = 0;
 
   s_state.rewind_load_frequency = -1;
   s_state.rewind_load_counter = -1;
@@ -2316,6 +2321,20 @@ bool System::GetFramePresentationParameters(GPUBackendFramePresentationParameter
       StartMediaCapture(mode, std::move(next_capture_path), video_width, video_height);
       frame->media_capture = s_state.media_capture.get();
     }
+  }
+
+  const u32 ff_skip = g_settings.display_fast_forward_frame_skip;
+  if (s_state.fast_forward_enabled && !s_state.turbo_enabled && !IsFastForwardingBoot() &&
+      s_state.memory_card_fast_forward_frames == 0 && ff_skip > 0 && !IsExecutionInterrupted() &&
+      !frame->media_capture)
+  {
+    const u32 interval = ff_skip + 1;
+    frame->present_frame &= ((s_state.fast_forward_display_skip_counter % interval) == 0);
+    s_state.fast_forward_display_skip_counter++;
+  }
+  else
+  {
+    s_state.fast_forward_display_skip_counter = 0;
   }
 
   if (!skip_this_frame)
@@ -2855,6 +2874,7 @@ void System::InternalReset()
   Achievements::OnSystemReset();
   s_state.frame_number = 1;
   s_state.internal_frame_number = 0;
+  s_state.fast_forward_display_skip_counter = 0;
 }
 
 bool System::SetBootMode(BootMode new_boot_mode, DiscRegion disc_region, bool* missing_bios, Error* error)
@@ -3859,6 +3879,8 @@ void System::SetFastForwardEnabled(bool enabled)
   if (!IsValid())
     return;
 
+  if (s_state.fast_forward_enabled != enabled)
+    s_state.fast_forward_display_skip_counter = 0;
   s_state.fast_forward_enabled = enabled;
   UpdateSpeedLimiterState();
 }
@@ -3873,6 +3895,8 @@ void System::SetTurboEnabled(bool enabled)
   if (!IsValid())
     return;
 
+  if (s_state.turbo_enabled != enabled)
+    s_state.fast_forward_display_skip_counter = 0;
   s_state.turbo_enabled = enabled;
   UpdateSpeedLimiterState();
 }

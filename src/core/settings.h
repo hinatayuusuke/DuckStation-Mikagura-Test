@@ -389,6 +389,7 @@ struct Settings : public GPUSettings
   float rewind_save_frequency = 10.0f;
 
   float display_pre_frame_sleep_buffer = DEFAULT_DISPLAY_PRE_FRAME_SLEEP_BUFFER;
+  u32 display_fast_forward_frame_skip = 0;
 
   std::array<ControllerType, NUM_CONTROLLER_AND_CARD_PORTS> controller_types{};
   std::array<MemoryCardType, NUM_CONTROLLER_AND_CARD_PORTS> memory_card_types{};

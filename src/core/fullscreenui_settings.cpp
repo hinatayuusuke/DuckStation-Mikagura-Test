@@ -3551,6 +3551,13 @@ void FullscreenUI::DrawEmulationSettingsPage()
     bsi, FSUI_ICONVSTR(ICON_FA_FORWARD, "Fast Forward Speed"),
     FSUI_VSTR("Sets the fast forward speed. It is not guaranteed that this speed will be reached on all systems."),
     "Main", "FastForwardSpeed", 0.0f);
+  static constexpr const std::array fast_forward_frame_skip_options = {
+    FSUI_NSTR("Disabled"), FSUI_NSTR("1 Frame"), FSUI_NSTR("2 Frames"), FSUI_NSTR("3 Frames")};
+  DrawIntListSetting(
+    bsi, FSUI_ICONVSTR(ICON_FA_FORWARD, "Fast Forward Frame Skip"),
+    FSUI_VSTR("Skips display presentation candidates while fast forwarding. Does not reduce emulation workload. "
+              "Actual display FPS depends on the host display and other presentation settings."),
+    "Display", "FastForwardFrameSkip", 0, fast_forward_frame_skip_options);
   DrawSpeedSelectorSetting(
     bsi, FSUI_ICONVSTR(ICON_FA_BOLT, "Turbo Speed"),
     FSUI_VSTR("Sets the turbo speed. It is not guaranteed that this speed will be reached on all systems."), "Main",
