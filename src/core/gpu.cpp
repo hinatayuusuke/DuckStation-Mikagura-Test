@@ -1557,10 +1557,19 @@ void GPU::UpdateCRTCTickEvent()
   if (Timers::IsSyncEnabled(HBLANK_TIMER_INDEX))
   {
     // when the timer sync is enabled we need to sync at vblank start and end
-    lines_until_event = (s_locals.crtc_state.current_scanline >= s_locals.crtc_state.vertical_display_end) ?
-                          (s_locals.crtc_state.vertical_total - s_locals.crtc_state.current_scanline +
-                           s_locals.crtc_state.vertical_display_start) :
-                          (s_locals.crtc_state.vertical_display_end - s_locals.crtc_state.current_scanline);
+    if (s_locals.crtc_state.current_scanline < s_locals.crtc_state.vertical_display_start)
+    {
+      // A CRTC sync after scanline wrap must still schedule the end of VBlank.
+      // Otherwise a gated system-clock timer remains paused until the next GPU access.
+      lines_until_event = s_locals.crtc_state.vertical_display_start - s_locals.crtc_state.current_scanline;
+    }
+    else
+    {
+      lines_until_event = (s_locals.crtc_state.current_scanline >= s_locals.crtc_state.vertical_display_end) ?
+                            (s_locals.crtc_state.vertical_total - s_locals.crtc_state.current_scanline +
+                             s_locals.crtc_state.vertical_display_start) :
+                            (s_locals.crtc_state.vertical_display_end - s_locals.crtc_state.current_scanline);
+    }
   }
   else
   {
