@@ -703,7 +703,10 @@ void CPU::LogInstruction(u32 bits, u32 pc, bool regs)
     }
   }
 
-  WriteToExecutionLog("%08x: %08x %s\n", pc, bits, instr.c_str());
+  WriteToExecutionLog(
+  "%llu %08x: %08x %s\n",
+  static_cast<unsigned long long>(System::GetGlobalTickCounter()),
+  pc, bits, instr.c_str());
 }
 
 void CPU::HandleWriteSyscall()

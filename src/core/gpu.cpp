@@ -4,6 +4,7 @@
 #include "gpu.h"
 #include "bus.h"
 #include "core.h"
+#include "cpu_core.h"
 #include "cpu_pgxp.h"
 #include "dma.h"
 #include "gpu_backend.h"
@@ -201,6 +202,7 @@ static void ReadVRAM(u16 x, u16 y, u16 width, u16 height);
 static void UpdateVRAM(u16 x, u16 y, u16 width, u16 height, const void* data, bool set_mask, bool check_mask);
 
 static void PrepareForDraw();
+static void TraceDumpState(const char* event, std::span<const u32> incoming = {}, u32 source_address = 0);
 static void FinishPolyline();
 template<GPUPrimitive primitive>
 static void FillDrawCommand(GPUBackendDrawCommand* RESTRICT cmd, GPURenderCommand rc);
@@ -402,6 +404,44 @@ ALIGN_TO_CACHE_LINE static Locals s_locals;
 #endif
 alignas(VRAM_STORAGE_ALIGNMENT) u16 g_vram[VRAM_SIZE / sizeof(u16)];
 u16 g_gpu_clut[GPU_CLUT_SIZE];
+
+// Diagnostic-only comments; no guest timing or rendering state is changed.
+// Enable by starting the ordinary GPU trace recorder. Remove after diagnosis.
+void GPU::TraceDumpState(const char* event, std::span<const u32> incoming, u32 source_address)
+{
+  GPUDump::Recorder* const dump = s_locals.gpu_dump.get();
+  if (!dump)
+    return;
+
+  const CRTCState& cs = s_locals.crtc_state;
+  SmallString line;
+  line.append_format(
+    "GPU_DIAG_V1 event={} system_tick={} event_tick={} cpu_pending={} frame={} internal_frame={} "
+    "gpustat={:08X} deint={} force_progressive={} interlaced_render={} "
+    "scanline={} line_tick={} crtc_elapsed={} vblank={} field={} display_field={} skip_lsb={} "
+    "display_x={} display_y={} pending_gpu={} gpu_elapsed={} max_ahead={} fifo_size={} blitter={} "
+    "source={:08X} incoming_count={}",
+    event, System::GetGlobalTickCounter(), TimingEvents::GetGlobalTickCounter(), CPU::GetPendingTicks(),
+    System::GetFrameNumber(), System::GetInternalFrameNumber(), s_locals.GPUSTAT.bits,
+    static_cast<u32>(g_settings.display_deinterlacing_mode), s_locals.force_progressive_scan,
+    IsInterlacedRenderingEnabled(), cs.current_scanline, cs.current_tick_in_scanline,
+    s_locals.crtc_tick_event.GetTicksSinceLastExecution(), cs.in_vblank,
+    static_cast<u32>(cs.interlaced_field), static_cast<u32>(cs.interlaced_display_field),
+    static_cast<u32>(cs.active_line_lsb), static_cast<u32>(cs.regs.X), static_cast<u32>(cs.regs.Y),
+    s_locals.pending_command_ticks, GetPendingCommandTicks(), s_locals.max_run_ahead,
+    s_locals.fifo.GetSize(), static_cast<u32>(s_locals.blitter_state), source_address, incoming.size());
+
+  line.append(" incoming=");
+  for (size_t i = 0; i < std::min<size_t>(incoming.size(), 12); i++)
+    line.append_format("{}{:08X}", i ? "," : "", incoming[i]);
+  line.append(" fifo=");
+  for (u32 i = 0; i < std::min<u32>(s_locals.fifo.GetSize(), 12); i++)
+    line.append_format("{}{:08X}", i ? "," : "", FifoPeek(i));
+
+  dump->BeginPacket(GPUDump::PacketType::Comment);
+  dump->WriteString(line.view());
+  dump->EndPacket();
+}
 
 void GPU::Initialize()
 {
@@ -834,7 +874,10 @@ void GPU::UpdateDMARequest()
       dma_request = false;
       break;
   }
+  const bool old_request = s_locals.GPUSTAT.dma_data_request;
   s_locals.GPUSTAT.dma_data_request = dma_request;
+  if (s_locals.gpu_dump && old_request != dma_request) [[unlikely]]
+    TraceDumpState("dma_request_changed");
   DMA::SetRequest(DMA::Channel::GPU, dma_request);
 }
 
@@ -876,7 +919,10 @@ void GPU::WriteRegister(u32 offset, u32 value)
     case 0x00:
     {
       if (s_locals.gpu_dump) [[unlikely]]
+      {
+        TraceDumpState("gp0_received", std::span<const u32>(&value, 1));
         s_locals.gpu_dump->WriteGP0Packet(value);
+      }
 
       // FIFO can be overflowed through direct GP0 writes if the command tick event hasn't run, because
       // there's no backpressure applied to the CPU. Instead force the GPU to run and catch up.
@@ -899,7 +945,10 @@ void GPU::WriteRegister(u32 offset, u32 value)
     case 0x04:
     {
       if (s_locals.gpu_dump) [[unlikely]]
+      {
+        TraceDumpState("gp1_received", std::span<const u32>(&value, 1));
         s_locals.gpu_dump->WriteGP1Packet(value);
+      }
 
       WriteGP1(value);
       return;
@@ -936,6 +985,7 @@ void GPU::DMAWrite(const u32* RESTRICT words, u32 address, u32 increment, u32 wo
 
   if (GPUDump::Recorder* dump = GPU::GetGPUDump()) [[unlikely]]
   {
+    TraceDumpState("dma_gp0_received", std::span<const u32>(words, word_count), address);
     // No wraparound?
     dump->BeginGP0Packet(word_count);
     dump->WriteWords(words, word_count);
@@ -1667,6 +1717,7 @@ void GPU::CRTCTickEvent(void*, TickCount ticks)
 
         if (s_locals.gpu_dump) [[unlikely]]
         {
+          TraceDumpState("vblank_before_present");
           s_locals.gpu_dump->WriteVSync(System::GetGlobalTickCounter());
           if (s_locals.gpu_dump->IsFinished()) [[unlikely]]
             StopRecordingGPUDump();
@@ -1725,6 +1776,9 @@ void GPU::CRTCTickEvent(void*, TickCount ticks)
       ConvertToBoolUnchecked((s_locals.crtc_state.regs.Y + s_locals.crtc_state.current_scanline) & u32(1));
   }
 
+  if (s_locals.gpu_dump && frame_done) [[unlikely]]
+    TraceDumpState("vblank_fields_updated");
+
   UpdateCRTCTickEvent();
 
   if (frame_done)
@@ -1745,12 +1799,16 @@ void GPU::CRTCTickEvent(void*, TickCount ticks)
 
 void GPU::CommandTickEvent(void*, TickCount ticks)
 {
+  if (s_locals.gpu_dump) [[unlikely]]
+    TraceDumpState("command_tick_begin");
   s_locals.pending_command_ticks -= SystemTicksToGPUTicks(ticks);
 
   s_locals.executing_commands = true;
   ExecuteCommands();
   UpdateCommandTickEvent();
   s_locals.executing_commands = false;
+  if (s_locals.gpu_dump) [[unlikely]]
+    TraceDumpState("command_tick_end");
 }
 
 void GPU::FrameDoneEvent(void*, TickCount ticks)
@@ -1769,6 +1827,8 @@ void GPU::UpdateCommandTickEvent()
   }
   else
   {
+    if (s_locals.gpu_dump) [[unlikely]]
+      TraceDumpState("command_event_schedule");
     s_locals.command_tick_event.SetIntervalAndSchedule(GPUTicksToSystemTicks(s_locals.pending_command_ticks));
   }
 }
@@ -2453,6 +2513,8 @@ void GPU::ClearDisplay()
 
 void GPU::UpdateDisplay(bool submit_frame)
 {
+  if (s_locals.gpu_dump) [[unlikely]]
+    TraceDumpState("display_snapshot");
   const bool interlaced = IsInterlacedDisplayEnabled();
   const u8 interlaced_field = s_locals.crtc_state.interlaced_field;
   const bool line_skip = (interlaced && s_locals.GPUSTAT.vertical_resolution);
@@ -3111,6 +3173,9 @@ bool GPU::HandleRenderPolygonCommand()
 
   if (IsInterlacedRenderingEnabled() && IsCRTCScanlinePending())
     SynchronizeCRTC();
+
+  if (s_locals.gpu_dump) [[unlikely]]
+    TraceDumpState("polygon_dispatch");
 
   // setup time
   static constexpr u16 s_setup_time[2][2][2] = {{{46, 226}, {334, 496}}, {{82, 262}, {370, 532}}};
@@ -3988,6 +4053,8 @@ bool GPU::StartRecordingGPUDump(const char* path, u32 num_frames /* = 1 */)
       fmt::format(TRANSLATE_FS("GPU", "Saving {0} frame GPU trace to '{1}'."), num_frames, Path::GetFileName(path)) :
       fmt::format(TRANSLATE_FS("GPU", "Saving multi-frame frame GPU trace to '{1}'."), num_frames,
                   Path::GetFileName(path)));
+
+  TraceDumpState("trace_started");
 
   // save screenshot to same location to identify it
   GPUBackend::RenderScreenshotToFile(Path::ReplaceExtension(path, "png"), DisplayScreenshotMode::ScreenResolution, 85,
