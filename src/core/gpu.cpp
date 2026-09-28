@@ -4054,6 +4054,7 @@ bool GPU::StartRecordingGPUDump(const char* path, u32 num_frames /* = 1 */)
       fmt::format(TRANSLATE_FS("GPU", "Saving multi-frame frame GPU trace to '{1}'."), num_frames,
                   Path::GetFileName(path)));
 
+  CPU::StartMikaguraProbeRecording();
   TraceDumpState("trace_started");
 
   // save screenshot to same location to identify it
@@ -4064,6 +4065,7 @@ bool GPU::StartRecordingGPUDump(const char* path, u32 num_frames /* = 1 */)
 
 void GPU::StopRecordingGPUDump()
 {
+  CPU::ResetMikaguraProbe();
   if (!s_locals.gpu_dump)
     return;
 

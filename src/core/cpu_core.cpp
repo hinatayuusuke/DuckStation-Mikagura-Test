@@ -7,6 +7,8 @@
 #include "cpu_core_private.h"
 #include "cpu_disasm.h"
 #include "cpu_pgxp.h"
+#include "gpu.h"
+#include "gpu_dump.h"
 #include "gte.h"
 #include "host.h"
 #include "pcdrv.h"
@@ -23,6 +25,7 @@
 #include "common/file_system.h"
 #include "common/log.h"
 #include "common/path.h"
+#include "common/small_string.h"
 #include "common/string_util.h"
 
 #include "fmt/format.h"
@@ -128,6 +131,111 @@ static bool TRACE_EXECUTION = false;
 
 } // namespace CPU
 
+// Targeted SLPS-01611 timing probe. No breakpoints, dispatcher changes,
+// guest memory writes, event execution, or additional emulated cycles.
+namespace {
+struct MikaguraProbeState
+{
+  bool active = false;
+  u64 tick = 0;
+  u32 source = 0;
+  u32 destination = 0;
+  u32 return_pc = 0;
+  u32 stack = 0;
+  CPUExecutionMode mode = CPUExecutionMode::Interpreter;
+};
+MikaguraProbeState s_mikagura_probe;
+
+void WriteMikaguraComment(const char* event, std::string_view detail)
+{
+  GPUDump::Recorder* const dump = GPU::GetGPUDump();
+  if (!dump)
+    return;
+  SmallString line;
+  line.append_format(
+    "CPU_PROBE_V1 event={} system_tick={} event_tick={} cpu_pending={} frame={} "
+    "configured={} actual={} interpreter={} debug_dispatcher={} cpu_trace={} "
+    "overclock={} clock_num={} clock_den={} {}",
+    event, System::GetGlobalTickCounter(), TimingEvents::GetGlobalTickCounter(), CPU::GetPendingTicks(),
+    System::GetFrameNumber(), Settings::GetCPUExecutionModeName(g_settings.cpu_execution_mode),
+    Settings::GetCPUExecutionModeName(CPU::s_locals.current_execution_mode),
+    CPU::g_state.using_interpreter, CPU::g_state.using_debug_dispatcher, CPU::IsTraceEnabled(),
+    static_cast<bool>(g_settings.cpu_overclock_active), g_settings.cpu_overclock_numerator, g_settings.cpu_overclock_denominator,
+    detail);
+  dump->BeginPacket(GPUDump::PacketType::Comment);
+  dump->WriteString(line.view());
+  dump->EndPacket();
+}
+
+// Read RAM directly: no bus handler, cache effects, or tick accounting.
+// Hashing is bounded to one physical RAM allocation; wraparound is rejected.
+bool MikaguraHashRAM(u32 address, u32 length, u64* hash)
+{
+  const u32 physical = address & 0x1FFFFFFFu;
+  if (physical >= Bus::RAM_MIRROR_END)
+    return false;
+  const u32 offset = physical & g_bus.ram_mask;
+  const u32 available = g_bus.ram_mask + 1u - offset;
+  if (length > available)
+    return false;
+  u64 result = UINT64_C(14695981039346656037);
+  for (u32 i = 0; i < length; i++)
+    result = (result ^ g_bus.ram[offset + i]) * UINT64_C(1099511628211);
+  *hash = result;
+  return true;
+}
+} // namespace
+
+void CPU::ResetMikaguraProbe()
+{
+  s_mikagura_probe = {};
+}
+
+void CPU::StartMikaguraProbeRecording()
+{
+  ResetMikaguraProbe();
+  if (System::GetGameSerial() == "SLPS-01611")
+    WriteMikaguraComment("probe_ready", "entry_pc=80038604 exit_pc=8003888C hash=fnv1a64");
+}
+
+void CPU::MikaguraProbeEnter()
+{
+  if (!GPU::GetGPUDump() || System::GetGameSerial() != "SLPS-01611")
+    return;
+  s_mikagura_probe = {true, System::GetGlobalTickCounter(), g_state.regs.a0, g_state.regs.a1,
+                      g_state.regs.ra, g_state.regs.sp, s_locals.current_execution_mode};
+  SmallString detail;
+  detail.append_format("pc=80038604 source={:08X} destination={:08X} return_pc={:08X} sp={:08X}",
+                       s_mikagura_probe.source, s_mikagura_probe.destination,
+                       s_mikagura_probe.return_pc, s_mikagura_probe.stack);
+  WriteMikaguraComment("expand_enter", detail.view());
+}
+
+void CPU::MikaguraProbeLeave()
+{
+  if (!GPU::GetGPUDump() || System::GetGameSerial() != "SLPS-01611" || !s_mikagura_probe.active)
+    return;
+  const MikaguraProbeState start = s_mikagura_probe;
+  ResetMikaguraProbe();
+  const u64 now = System::GetGlobalTickCounter();
+  const u32 input_bytes = g_state.regs.a0 - start.source;
+  const u32 output_bytes = g_state.regs.a1 - start.destination;
+  u64 input_hash = 0, output_hash = 0;
+  const bool matched = now >= start.tick && g_state.regs.ra == start.return_pc &&
+                       g_state.regs.sp == start.stack && s_locals.current_execution_mode == start.mode;
+  const bool input_valid = matched && MikaguraHashRAM(start.source, input_bytes, &input_hash);
+  const bool output_valid = matched && MikaguraHashRAM(start.destination, output_bytes, &output_hash);
+  SmallString detail;
+  detail.append_format(
+    "pc=8003888C enter_tick={} elapsed={} matched={} source={:08X} source_end={:08X} "
+    "destination={:08X} destination_end={:08X} input_bytes={} output_bytes={} "
+    "input_hash_valid={} output_hash_valid={} input_fnv1a64={:016X} output_fnv1a64={:016X}",
+    start.tick, now >= start.tick ? now - start.tick : 0, matched, start.source, g_state.regs.a0,
+    start.destination, g_state.regs.a1, input_bytes, output_bytes, input_valid, output_valid,
+    input_hash, output_hash);
+  WriteMikaguraComment("expand_leave", detail.view());
+}
+
 bool CPU::IsTraceEnabled()
 {
   return s_locals.trace_to_log;
@@ -204,6 +312,7 @@ void CPU::Shutdown()
 
 void CPU::Reset()
 {
+  ResetMikaguraProbe();
   g_state.exception_raised = false;
   g_state.bus_error = false;
 
@@ -240,6 +349,8 @@ void CPU::Reset()
 
 bool CPU::DoState(StateWrapper& sw)
 {
+  if (sw.IsReading())
+    ResetMikaguraProbe();
   sw.Do(&g_state.pending_ticks);
   sw.Do(&g_state.downcount);
   sw.DoEx(&g_state.gte_completion_tick, 78, static_cast<u32>(0));
@@ -931,6 +1042,11 @@ ALWAYS_INLINE_RELEASE void CPU::ExecuteInstruction()
 {
 restart_instruction:
   const Instruction inst = g_state.current_instruction;
+  // Includes normal/debug Interpreter and cached/uncached fallback execution.
+  if (g_state.current_instruction_pc == 0x80038604 && inst.bits == 0x8C890000) [[unlikely]]
+    MikaguraProbeEnter();
+  else if (g_state.current_instruction_pc == 0x8003888C && inst.bits == 0x03E00008) [[unlikely]]
+    MikaguraProbeLeave();
 
 #if 0
   if (g_state.current_instruction_pc == 0x80030000)

@@ -1190,6 +1190,18 @@ void CPU::Recompiler::Recompiler::CompileInstruction()
 
   m_cycles++;
 
+  // Emit only at the two known instructions, not in every compiled block.
+  // Materialize registers/cycles for observation; preserve PC, load delays and
+  // the dispatcher. The helper neither executes events nor changes guest state.
+  const bool probe_enter = m_current_instruction_pc == 0x80038604 && inst->bits == 0x8C890000;
+  const bool probe_leave = m_current_instruction_pc == 0x8003888C && inst->bits == 0x03E00008;
+  if (probe_enter || probe_leave)
+  {
+    Flush(FLUSH_FOR_C_CALL | FLUSH_FLUSH_MIPS_REGISTERS | FLUSH_CYCLES);
+    GenerateCall(probe_enter ? reinterpret_cast<const void*>(&CPU::MikaguraProbeEnter) :
+                               reinterpret_cast<const void*>(&CPU::MikaguraProbeLeave));
+  }
+
   if (IsNopInstruction(*inst))
   {
     UpdateLoadDelay();

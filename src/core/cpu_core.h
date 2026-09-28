@@ -21,6 +21,12 @@ class SmallStringBase;
 
 namespace CPU {
 
+// Temporary SLPS-01611 probe; writes comments to the active GPU recording only.
+void ResetMikaguraProbe();
+void StartMikaguraProbeRecording();
+void MikaguraProbeEnter();
+void MikaguraProbeLeave();
+
 enum : VirtualMemoryAddress
 {
   RESET_VECTOR = UINT32_C(0xBFC00000)
