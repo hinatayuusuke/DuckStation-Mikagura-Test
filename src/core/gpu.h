@@ -106,6 +106,12 @@ void GetBeamPosition(u32* out_ticks, u32* out_line);
 // Returns the number of system clock ticks until the specified tick/line.
 TickCount GetSystemTicksUntilTicksAndLine(u32 ticks, u32 line);
 
+// Temporary SLPS-01611 diagnostic comments in the active GPU recording.
+void TraceMovieEvent(const char* event, u32 arg0 = 0, u32 arg1 = 0, u32 arg2 = 0, u32 arg3 = 0,
+                     bool cpu_context = false);
+void TraceMovieRFE();
+void TraceMovieDrawEntry();
+
 // Returns the number of visible lines.
 u16 GetCRTCActiveStartLine();
 u16 GetCRTCActiveEndLine();

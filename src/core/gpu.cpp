@@ -912,6 +912,107 @@ u32 GPU::ReadRegister(u32 offset)
   }
 }
 
+// Temporary movie-transition diagnostics. Observation only: do not synchronize
+// the GPU/timers, read MMIO, write guest RAM, or dispatch events from this helper.
+void GPU::TraceMovieEvent(const char* event, u32 arg0, u32 arg1, u32 arg2, u32 arg3, bool cpu_context)
+{
+  GPUDump::Recorder* const dump = s_locals.gpu_dump.get();
+  if (!dump || System::GetGameSerial() != "SLPS-01611")
+    return;
+
+  const auto& cpu = CPU::g_state;
+  const CRTCState& cs = s_locals.crtc_state;
+  SmallString line;
+  line.append_format(
+    "MOVIE_DIAG_V1 event={} system_tick={} event_tick={} cpu_pending={} frame={} "
+    "arg0={:08X} arg1={:08X} arg2={:08X} arg3={:08X} cpu_context={} "
+    "pc={:08X} instruction={:08X} delay_slot={} sr={:08X} cause={:08X} epc={:08X} "
+    "irq_status={:08X} irq_mask={:08X} configured={} actual={} cpu_trace={} debug_dispatcher={} "
+    "gpustat={:08X} scanline={} line_tick={} crtc_elapsed={} vblank={} "
+    "vstart={} vend={} display_x={} display_y={} deint={} overclock={}",
+    event, System::GetGlobalTickCounter(), TimingEvents::GetGlobalTickCounter(), CPU::GetPendingTicks(),
+    System::GetFrameNumber(), arg0, arg1, arg2, arg3, cpu_context,
+    (std::string_view(event) == "cpu_irq_accept") ? arg0 : cpu.current_instruction_pc,
+    cpu.current_instruction.bits, cpu.current_instruction_in_branch_delay_slot,
+    cpu.cop0_regs.sr.bits, cpu.cop0_regs.cause.bits, cpu.cop0_regs.EPC,
+    InterruptController::ReadRegister(0), InterruptController::ReadRegister(4),
+    Settings::GetCPUExecutionModeName(g_settings.cpu_execution_mode),
+    Settings::GetCPUExecutionModeName(CPU::GetCurrentExecutionMode()), CPU::IsTraceEnabled(),
+    cpu.using_debug_dispatcher, s_locals.GPUSTAT.bits, cs.current_scanline, cs.current_tick_in_scanline,
+    s_locals.crtc_tick_event.GetTicksSinceLastExecution(), cs.in_vblank,
+    cs.vertical_display_start, cs.vertical_display_end, static_cast<u32>(cs.regs.X),
+    static_cast<u32>(cs.regs.Y), static_cast<u32>(g_settings.display_deinterlacing_mode),
+    static_cast<bool>(g_settings.cpu_overclock_active));
+
+  // ReadRegister above accesses ONLY the interrupt controller's plain latches.
+  // Timer/GPU register readers must not be used here (they may execute events).
+  if (cpu_context)
+  {
+    if (std::string_view(event) == "gp1_before")
+    {
+      const u32 bits = cpu.current_instruction.bits;
+      const u32 address = cpu.regs.r[(bits >> 21) & 31u] +
+                          static_cast<u32>(static_cast<s32>(static_cast<s16>(bits & 0xFFFFu)));
+      const u32 value = cpu.regs.r[(bits >> 16) & 31u];
+      const bool store_match = (bits >> 26) == 0x2Bu &&
+                               (address & 0x1FFFFFFFu) == 0x1F801814u && value == arg0;
+      line.append_format(" store_match={} store_address={:08X} store_value={:08X}", store_match, address, value);
+    }
+    line.append(" gpr=");
+    for (u32 i = 0; i < 32; i++)
+      line.append_format("{}{:08X}", i ? "," : "", cpu.regs.r[i]);
+
+    // Raw stack words are evidence, not an unwound call stack. Invalid ranges
+    // (including BIOS, scratchpad and wraparound) are explicitly rejected.
+    const u32 physical = cpu.regs.sp & 0x1FFFFFFFu;
+    const u32 offset = physical & g_bus.ram_mask;
+    const bool stack_valid = g_bus.ram && physical < Bus::RAM_MIRROR_END &&
+                             (physical & 3u) == 0 && (g_bus.ram_mask + 1u - offset) >= 128u;
+    line.append_format(" stack_valid={} stack=", stack_valid);
+    if (stack_valid)
+    {
+      for (u32 i = 0; i < 32; i++)
+      {
+        const u8* p = g_bus.ram + offset + i * 4;
+        const u32 word = u32(p[0]) | (u32(p[1]) << 8) | (u32(p[2]) << 16) | (u32(p[3]) << 24);
+        line.append_format("{}{:08X}", i ? "," : "", word);
+      }
+    }
+    const auto append_code = [&](const char* name, u32 address) {
+      const u32 phys = address & 0x1FFFFFFFu;
+      const u32 off = phys & g_bus.ram_mask;
+      const bool valid = g_bus.ram && phys < Bus::RAM_MIRROR_END &&
+                         (phys & 3u) == 0 && g_bus.ram_mask + 1u - off >= 64u;
+      line.append_format(" {}_base={:08X} {}_valid={} {}=", name, address, name, valid, name);
+      if (valid)
+      {
+        for (u32 i = 0; i < 16; i++)
+        {
+          const u8* p = g_bus.ram + off + i * 4;
+          const u32 word = u32(p[0]) | (u32(p[1]) << 8) | (u32(p[2]) << 16) | (u32(p[3]) << 24);
+          line.append_format("{}{:08X}", i ? "," : "", word);
+        }
+      }
+    };
+    const u32 context_pc = (std::string_view(event) == "cpu_irq_accept") ? arg0 : cpu.current_instruction_pc;
+    append_code("ram_code", context_pc - 32u);
+    append_code("caller_code", cpu.regs.ra - 32u);
+  }
+  dump->BeginPacket(GPUDump::PacketType::Comment);
+  dump->WriteString(line.view());
+  dump->EndPacket();
+}
+
+void GPU::TraceMovieRFE()
+{
+  TraceMovieEvent("cpu_rfe_before", 0, 0, 0, 0, true);
+}
+
+void GPU::TraceMovieDrawEntry()
+{
+  TraceMovieEvent("draw_entry_8002B674", 0, 0, 0, 0, true);
+}
+
 void GPU::WriteRegister(u32 offset, u32 value)
 {
   switch (offset)
@@ -950,7 +1051,14 @@ void GPU::WriteRegister(u32 offset, u32 value)
         s_locals.gpu_dump->WriteGP1Packet(value);
       }
 
+      // GP1 display controls only; DMA-direction writes are intentionally omitted.
+      const u32 movie_op = value >> 24;
+      const bool movie_control = movie_op == 3 || (movie_op >= 5 && movie_op <= 8);
+      if (movie_control)
+        TraceMovieEvent("gp1_before", value, offset, 0, 0, true);
       WriteGP1(value);
+      if (movie_control)
+        TraceMovieEvent("gp1_after", value, offset);
       return;
     }
 
@@ -4065,6 +4173,8 @@ bool GPU::StartRecordingGPUDump(const char* path, u32 num_frames /* = 1 */)
 
   CPU::StartMikaguraProbeRecording();
   TraceDumpState("trace_started");
+  TraceMovieEvent("record_start");
+  Timers::TraceMovieTimer1("timer1_record_start");
 
   // save screenshot to same location to identify it
   GPUBackend::RenderScreenshotToFile(Path::ReplaceExtension(path, "png"), DisplayScreenshotMode::ScreenResolution, 85,

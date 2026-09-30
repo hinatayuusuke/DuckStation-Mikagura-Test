@@ -14,6 +14,9 @@ void Shutdown();
 void Reset();
 bool DoState(StateWrapper& sw);
 
+// Unsynchronized diagnostic snapshot; never calls ReadRegister().
+void TraceMovieTimer1(const char* event);
+
 void SetGate(u32 timer, bool state);
 
 void DrawDebugStateWindow(float scale);

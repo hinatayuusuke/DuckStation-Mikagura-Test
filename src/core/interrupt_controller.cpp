@@ -3,6 +3,7 @@
 
 #include "interrupt_controller.h"
 #include "cpu_core.h"
+#include "gpu.h"
 
 #include "util/state_wrapper.h"
 
@@ -60,6 +61,9 @@ void InterruptController::SetLineState(IRQ irq, bool state)
 
   s_interrupt_status_register |= (state ? (prev_state ^ s_interrupt_line_state) : 0u) & s_interrupt_line_state;
   UpdateCPUInterruptRequest();
+  if (irq == IRQ::VBLANK || irq == IRQ::TMR1)
+    GPU::TraceMovieEvent("irq_line", static_cast<u32>(irq), state ? 1u : 0u,
+                         prev_state, s_interrupt_line_state);
 }
 
 u32 InterruptController::ReadRegister(u32 offset)
@@ -80,6 +84,8 @@ u32 InterruptController::ReadRegister(u32 offset)
 
 void InterruptController::WriteRegister(u32 offset, u32 value)
 {
+  if (offset == 0 || offset == 4)
+    GPU::TraceMovieEvent("irq_register_before", offset, value, 0, 0, true);
   switch (offset)
   {
     case 0x00: // I_STATUS

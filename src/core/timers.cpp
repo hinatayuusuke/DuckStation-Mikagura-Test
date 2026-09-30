@@ -161,13 +161,26 @@ bool Timers::IsExternalIRQEnabled(u32 timer)
   return (cs.external_counting_enabled && (cs.mode.bits & ((1u << 4) | (1u << 5))) != 0);
 }
 
+void Timers::TraceMovieTimer1(const char* event)
+{
+  const CounterState& cs = s_state.counters[1];
+  const u32 flags = u32(cs.gate) | (u32(cs.counting_enabled) << 1) |
+                    (u32(cs.use_external_clock) << 2) | (u32(cs.external_counting_enabled) << 3) |
+                    (u32(cs.irq_done) << 4);
+  GPU::TraceMovieEvent(event, cs.mode.bits, cs.counter, cs.target, flags);
+}
+
 void Timers::SetGate(u32 timer, bool state)
 {
   CounterState& cs = s_state.counters[timer];
   if (cs.gate == state)
     return;
 
+  if (timer == 1)
+    TraceMovieTimer1("timer1_gate_before");
   cs.gate = state;
+  if (timer == 1)
+    TraceMovieTimer1("timer1_gate_changed");
 
   if (!cs.mode.sync_enable)
     return;
@@ -201,6 +214,8 @@ void Timers::SetGate(u32 timer, bool state)
 
   UpdateCountingEnabled(timer, cs);
   UpdateSysClkEvent();
+  if (timer == 1)
+    TraceMovieTimer1("timer1_gate_after");
 }
 
 TickCount Timers::GetTicksUntilIRQ(u32 timer)
@@ -278,6 +293,8 @@ void Timers::CheckForIRQ(u32 timer, u32 old_counter)
 
   if (interrupt_request)
   {
+    if (timer == 1)
+      TraceMovieTimer1("timer1_irq_request");
     const InterruptController::IRQ irqnum =
       static_cast<InterruptController::IRQ>(static_cast<u32>(InterruptController::IRQ::TMR0) + timer);
     if (!cs.mode.irq_pulse_n)
@@ -383,6 +400,11 @@ u32 Timers::ReadRegister(u32 offset)
 
 void Timers::WriteRegister(u32 offset, u32 value)
 {
+  if ((offset >> 4) == 1)
+  {
+    GPU::TraceMovieEvent("timer1_write_before", offset, value, 0, 0, true);
+    TraceMovieTimer1("timer1_state_before_write");
+  }
   const u32 timer_index = (offset >> 4) & u32(0x03);
   const u32 port_offset = offset & u32(0x0F);
   if (timer_index >= 3) [[unlikely]]
@@ -481,6 +503,8 @@ void Timers::WriteRegister(u32 offset, u32 value)
       ERROR_LOG("Write unknown register in timer {} (offset 0x{:02X}, value 0x{:X})", timer_index, offset, value);
       break;
   }
+  if (timer_index == 1)
+    TraceMovieTimer1("timer1_state_after_write");
 }
 
 void Timers::UpdateCountingEnabled(u32 index, CounterState& cs)

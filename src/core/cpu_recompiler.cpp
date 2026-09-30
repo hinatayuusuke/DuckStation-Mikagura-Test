@@ -6,6 +6,7 @@
 #include "cpu_core_private.h"
 #include "cpu_disasm.h"
 #include "cpu_pgxp.h"
+#include "gpu.h"
 #include "settings.h"
 
 #include "common/assert.h"
@@ -1189,6 +1190,26 @@ void CPU::Recompiler::Recompiler::CompileInstruction()
 #endif
 
   m_cycles++;
+
+  // Diagnostic build: materialize store context without adding guest cycles,
+  // invoking a helper, changing load delays, or forcing an execution mode.
+  // Emit unconditionally: BIOS blocks may be compiled before the game serial
+  // is known, and a GPU recording may start after a block was compiled.
+  if (inst->op == InstructionOp::sb || inst->op == InstructionOp::sh ||
+      inst->op == InstructionOp::sw || inst->op == InstructionOp::swl ||
+      inst->op == InstructionOp::swr || inst->op == InstructionOp::swc2)
+  {
+    Flush(FLUSH_FLUSH_MIPS_REGISTERS | FLUSH_INSTRUCTION_BITS);
+  }
+
+  const bool movie_rfe = inst->op == InstructionOp::cop0 && !inst->cop.IsCommonInstruction() &&
+                         inst->cop.Cop0Op() == Cop0Instruction::rfe;
+  if (movie_rfe || m_current_instruction_pc == 0x8002B674)
+  {
+    Flush(FLUSH_FOR_C_CALL | FLUSH_FLUSH_MIPS_REGISTERS | FLUSH_CYCLES | FLUSH_INSTRUCTION_BITS);
+    GenerateCall(movie_rfe ? reinterpret_cast<const void*>(&GPU::TraceMovieRFE) :
+                            reinterpret_cast<const void*>(&GPU::TraceMovieDrawEntry));
+  }
 
   // Emit only at the two known instructions, not in every compiled block.
   // Materialize registers/cycles for observation; preserve PC, load delays and

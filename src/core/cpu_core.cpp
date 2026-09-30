@@ -462,6 +462,8 @@ ALWAYS_INLINE_RELEASE u32 CPU::GetExceptionVector(bool debug_exception /* = fals
 
 ALWAYS_INLINE_RELEASE void CPU::RaiseException(u32 CAUSE_bits, u32 EPC, u32 vector)
 {
+  if ((CAUSE_bits & 0x7Cu) == 0) // Interrupt, before exception state is changed.
+    GPU::TraceMovieEvent("cpu_irq_accept", EPC, CAUSE_bits, vector, 0, true);
   g_state.cop0_regs.EPC = EPC;
   g_state.cop0_regs.cause.bits = (g_state.cop0_regs.cause.bits & ~Cop0Registers::CAUSE::EXCEPTION_WRITE_MASK) |
                                  (CAUSE_bits & Cop0Registers::CAUSE::EXCEPTION_WRITE_MASK);
@@ -1042,6 +1044,8 @@ ALWAYS_INLINE_RELEASE void CPU::ExecuteInstruction()
 {
 restart_instruction:
   const Instruction inst = g_state.current_instruction;
+  if (g_state.current_instruction_pc == 0x8002B674) [[unlikely]]
+    GPU::TraceMovieDrawEntry();
   // Includes normal/debug Interpreter and cached/uncached fallback execution.
   if (g_state.current_instruction_pc == 0x80038604 && inst.bits == 0x8C890000) [[unlikely]]
     MikaguraProbeEnter();
@@ -2008,6 +2012,7 @@ restart_instruction:
         {
           case Cop0Instruction::rfe:
           {
+            GPU::TraceMovieRFE();
             // restore mode
             g_state.cop0_regs.sr.mode_bits =
               (g_state.cop0_regs.sr.mode_bits & UINT32_C(0b110000)) | (g_state.cop0_regs.sr.mode_bits >> 2);
